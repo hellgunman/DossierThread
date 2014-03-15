@@ -5,7 +5,7 @@ RESSOURCES=Ressources
 CLIENTTETRIS=ClientTetris
 ECRAN=Ecran
 
-CC = g++ -O0 -g3 -DKNOPPIX -I$(ECRAN) -I$(GRILLESDL) -I$(RESSOURCES) -I$(CLIENTTETRIS) -I /opt/guengel/include/SDL
+CC = g++ -O0 -g3 -DKNOPPIX -I$(ECRAN) -I$(GRILLESDL) -I$(RESSOURCES) -I$(CLIENTTETRIS) -I /opt/guengel/include
 OBJS = $(GRILLESDL)/GrilleSDL.o $(RESSOURCES)/Ressources.o $(CLIENTTETRIS)/ClientTetris.o $(ECRAN)/Ecran.o
 PROGRAMS = Tetris Serveur
 
