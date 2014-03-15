@@ -70,15 +70,19 @@ struct struct_message message;
 int tailleMessage;
 PIECE pieceInseree;
 PIECE pieceEnCours;
+char majScore = 0;
+int score = 0;
 void* thread_piece(void*);
 void* thread_message(void*);
 void* thread_event(void*);
+void* thread_score(void*);
 void set_message(const char* string);
 
 
+pthread_mutex_t mutex_score;
 pthread_mutex_t mutex_message, mutex_pieceEnCours, mutex_casesInserees, mutex_tab;
-pthread_cond_t cond_casesInserees;
-pthread_t hthread_message, hthread_piece, hthread_event;
+pthread_cond_t cond_casesInserees, cond_score;
+pthread_t hthread_message, hthread_piece, hthread_event, hthread_score;
 
 int main(int argc,char* argv[])
 {
@@ -115,9 +119,12 @@ int main(int argc,char* argv[])
 	pthread_mutex_init(&mutex_pieceEnCours, NULL);
 	pthread_mutex_init(&mutex_casesInserees, NULL);
 	pthread_mutex_init(&mutex_tab, NULL);
+	pthread_mutex_init(&mutex_score, NULL);
 	pthread_cond_init(&cond_casesInserees, NULL);
+	pthread_cond_init(&cond_score, NULL);
 
 
+	pthread_create(&hthread_score, NULL,thread_score, NULL);
 	pthread_create(&hthread_message, NULL, thread_message, NULL);
 	pthread_create(&hthread_piece, NULL, thread_piece, NULL);
 	pthread_create(&hthread_event, NULL, thread_event, NULL);
@@ -184,23 +191,16 @@ void* thread_event(void* a)
 		pthread_mutex_destroy(&mutex_message);
 		pthread_mutex_destroy(&mutex_pieceEnCours);
 		pthread_mutex_destroy(&mutex_tab);
+		pthread_mutex_destroy(&mutex_score);
 
 		pthread_cond_destroy(&cond_casesInserees);
+		pthread_cond_destroy(&cond_score);
 
 		printf("OK\n"); fflush(stdout);
 
 
 		pthread_exit(NULL);
 		return NULL;
-}
-
-void set_score(int score)
-{
-	char cscore[5];
-	int i;
-	sprintf(cscore, "%04d", score);
-	for (i = 0; i < 4; ++i)
-		DessineLettre(1, 15+i, cscore[i]);
 }
 
 void set_message(const char* string)
@@ -311,14 +311,13 @@ void* thread_piece(void* a)
 	int i, j, cmin, lmin, cmax, lmax, c, l;
 	CASE ctemp;
 	PIECE ptemp;
-	int score = 0;
 	char scoreString[8];
 
-	set_score(score);
 
 	pthread_mutex_lock(&mutex_pieceEnCours);
 	pieceEnCours = pieces[0];
 	pthread_mutex_unlock(&mutex_pieceEnCours);
+
 
 	while (1)
 	{
@@ -416,7 +415,12 @@ void* thread_piece(void* a)
 			if (i == ptemp.nbCases)
 			{
 				int j;
-				set_score(++score);
+				pthread_mutex_lock(&mutex_score);
+				score++;
+				majScore = 1;
+				pthread_cond_signal(&cond_score);
+				pthread_mutex_unlock(&mutex_score);
+
 
 				pthread_mutex_lock(&mutex_tab);
 				for (j = 0; j < ptemp.nbCases; ++j)
@@ -433,6 +437,28 @@ void* thread_piece(void* a)
 
 	}
 	return NULL;
+}
+
+void *thread_score(void *a) {
+    printf("(THREAD SCORE) Lancement du thread Score\n");
+    char cscore[5];
+    int i;
+    //pthread_cleanup_push(sendScore, NULL);
+    sprintf(cscore, "   0");
+	for (i = 0; i < 4; ++i)
+		DessineLettre(1, 15+i, cscore[i]);
+    pthread_mutex_lock(&mutex_score);
+    while(!majScore) {
+        printf("(THREAD SCORE) MAJ du score : '%4d'\n", score);
+        pthread_cond_wait(&cond_score, &mutex_score);
+        sprintf(cscore, "%4d", score);
+    	for (i = 0; i < 4; ++i)
+    		DessineLettre(1, 15+i, cscore[i]);
+        majScore = 0;
+    }
+    pthread_mutex_unlock(&mutex_score);
+    //pthread_cleanup_pop(1);
+    return NULL;
 }
 
 
