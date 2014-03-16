@@ -535,12 +535,7 @@ pieceEnCours = pieces[0]; /// TRIIIIIIIIIIIIIIIIIIIICHE
 				{
 					pthread_kill(tabthreadcase[ptemp.cases[i].ligne][ptemp.cases[i].colonne], SIGUSR1);
 					++i;
-				}
-				
-				/*pthread_mutex_lock(&mutex_traitement);
-				traitementEnCours = 0;
-				pthread_mutex_unlock(&mutex_traitement);
-				DessineSprite(12, 11, VOYANT_VERT);*/
+				}				
 				break;
 			}
 			else
@@ -727,8 +722,12 @@ void* thread_gravite(void*)
 			continue;
 		}
 		printf("(THREAD GRAVITE) COND RECEIVED\n");
-
-
+		
+		pthread_mutex_lock(&mutex_traitement);
+		traitementEnCours = 1;
+		pthread_mutex_unlock(&mutex_traitement);
+		DessineSprite(12, 11, VOYANT_BLEU);
+		
 		for (i = 0; i < 4; i++)
 		{
 			for (j = i+1; j < 4; j++)
@@ -899,6 +898,11 @@ void* thread_gravite(void*)
 		}
 		
 		nbAnalyses = 0;
+		
+		pthread_mutex_lock(&mutex_traitement);
+		traitementEnCours = 0;
+		pthread_mutex_unlock(&mutex_traitement);
+		DessineSprite(12, 11, VOYANT_VERT);
 	}
 
 
