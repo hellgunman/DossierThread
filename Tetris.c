@@ -85,19 +85,31 @@ void* thread_score(void*);
 void* thread_gravite(void*);
 void set_message(const char* string);
 
+void *thread_case(void* a);
+void handlerSIGUSR1(int sig);
 
-pthread_mutex_t mutex_score, mutex_analyse;
-pthread_mutex_t mutex_message, mutex_pieceEnCours, mutex_casesInserees, mutex_tab;
-pthread_cond_t cond_casesInserees, cond_score, cond_analyse;
-pthread_t hthread_message, hthread_piece, hthread_event, hthread_score, hthread_gravite;
+
+pthread_key_t key;
+
+pthread_mutex_t mutex_message, mutex_pieceEnCours, mutex_casesInserees, mutex_tab, mutex_threadcase, mutex_analyse, mutex_score;
+pthread_cond_t cond_casesInserees, cond_analyse, cond_score;
+pthread_t hthread_message, hthread_piece, hthread_event, hthread_gravite, hthread_score, tabthreadcase[14][10];
 
 int main(int argc,char* argv[])
 {
 	EVENT_GRILLE_SDL event;
 	char buffer[80];
 	char ok;
+	int i, j;
+	CASE c;
+	struct sigaction sigact;
 	
 	srand((unsigned)time(NULL));
+	
+	
+	/// SIGUSR1
+	sigact.sa_handler = handlerSIGUSR1;
+    sigaction(SIGUSR1, &sigact, NULL);
 
 	// Ouverture de la grille de jeu (SDL)
 	printf("(THREAD MAIN) Ouverture de la grille de jeu\n");
@@ -139,6 +151,25 @@ int main(int argc,char* argv[])
 	pthread_create(&hthread_event, NULL, thread_event, NULL);
 	pthread_create(&hthread_gravite, NULL, thread_gravite, NULL);
 
+	
+	
+	
+	/**********************************/
+	pthread_mutex_lock(&mutex_threadcase);
+    for(i=0;i<14;i++)
+	{
+        for(j=0;j<10;j++)
+		{
+            c.ligne = i;
+            c.colonne = j;
+			
+			pthread_create(&tabthreadcase[i][j], NULL, thread_case, &c);
+            pthread_mutex_lock(&mutex_threadcase);
+        }
+    }
+    pthread_mutex_unlock(&mutex_threadcase);
+	/****************************************/
+	
 	pthread_join(hthread_event, NULL);
 
 	exit(0);
@@ -441,6 +472,21 @@ void* thread_piece(void* a)
 					DessineSprite(ptemp.cases[j].ligne, ptemp.cases[j].colonne, BRIQUE);
 				}
 				pthread_mutex_unlock(&mutex_tab);
+				
+				//////////////////////////////////////////////
+				pthread_mutex_lock(&mutex_analyse);
+				nbColonnesCompletes = 0;
+				nbLignesCompletes = 0;
+				nbAnalyses = 0; /******************* verif*/
+				pthread_mutex_unlock(&mutex_analyse);
+				
+				i = 0;
+				while(i < pieceEnCours.nbCases)
+				{
+					pthread_kill(tabthreadcase[ptemp.cases[i].ligne][ptemp.cases[i].colonne], SIGUSR1);
+					++i;
+				}
+				
 				break;
 			}
 
@@ -472,6 +518,122 @@ void *thread_score(void *a) {
     //pthread_cleanup_pop(1);
     return NULL;
 }
+
+/***************************** THREAD CASE ***************************************/
+void *thread_case(void* a)
+{
+    CASE *c = (CASE*)malloc(sizeof(CASE));
+	
+    if(!c)
+        fprintf(stderr, "Erreur malloc thread CASE\n");
+	
+    pthread_setspecific(key, c);
+	
+    *c = *(CASE*) a;
+    pthread_mutex_unlock(&mutex_threadcase);
+
+    while(1)
+        pause();
+}
+
+void handlerSIGUSR1(int sig)
+{
+    int i;
+	CASE *c = (CASE*)pthread_getspecific(key);
+    
+	i = 0;
+	while(i < 10)
+	{
+        pthread_mutex_lock(&mutex_tab);
+		
+        if(tab[c->ligne][i] == 0)
+		{
+            pthread_mutex_unlock(&mutex_tab);
+            break;
+        }
+		
+        pthread_mutex_unlock(&mutex_tab);
+		i++;
+    }
+
+    if(i == 10)
+	{
+        pthread_mutex_lock(&mutex_analyse);
+		
+        i = 0;
+        while(i < nbLignesCompletes)
+		{
+            if(lignesCompletes[i] == c->ligne)
+                break;
+            i++;
+        }
+		
+        if(i == nbLignesCompletes)
+		{
+            lignesCompletes[nbLignesCompletes] = c->ligne;
+            nbLignesCompletes++;
+			
+			i = 0;
+			while(i < 10)
+            {
+                DessineSprite(c->ligne,i,FUSION);
+				i++;
+            }
+        }
+		
+        pthread_mutex_unlock(&mutex_analyse);
+    }
+	
+	i = 0;
+	while(i < 14)
+	{
+        pthread_mutex_lock(&mutex_tab);
+		
+        if(tab[i][c->colonne] == 0)
+		{
+            pthread_mutex_unlock(&mutex_tab);
+            break;
+        }
+		
+        pthread_mutex_unlock(&mutex_tab);
+		i++;
+    }
+
+    if(i == 14)
+	{
+        pthread_mutex_lock(&mutex_analyse);
+		
+		i = 0;
+        while(i < nbColonnesCompletes)
+		{
+            if(colonnesCompletes[i] == c->colonne)
+                break;
+            i++;
+        }
+		
+        if(i == nbColonnesCompletes)
+		{
+			colonnesCompletes[nbColonnesCompletes] = c->colonne;
+            nbColonnesCompletes++;
+
+            i = 0;
+			while(i < 14)
+			{
+                DessineSprite(i,c->colonne,FUSION);
+				i++;
+            }
+        }
+		
+        pthread_mutex_unlock(&mutex_analyse);
+    }
+
+    pthread_mutex_lock(&mutex_analyse);
+    nbAnalyses++;
+    pthread_cond_signal(&cond_analyse);
+    pthread_mutex_unlock(&mutex_analyse);
+}
+/*********************************************************************************/
+
 
 void* thread_gravite(void*)
 {
