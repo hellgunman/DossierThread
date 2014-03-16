@@ -72,17 +72,24 @@ PIECE pieceInseree;
 PIECE pieceEnCours;
 char majScore = 0;
 int score = 0;
+int nbAnalyses = 0;
+int colonnesCompletes[4];
+int nbColonnesCompletes = 0;
+int lignesCompletes[4];
+int nbLignesCompletes = 0;
+
 void* thread_piece(void*);
 void* thread_message(void*);
 void* thread_event(void*);
 void* thread_score(void*);
+void* thread_gravite(void*);
 void set_message(const char* string);
 
 
-pthread_mutex_t mutex_score;
+pthread_mutex_t mutex_score, mutex_analyse;
 pthread_mutex_t mutex_message, mutex_pieceEnCours, mutex_casesInserees, mutex_tab;
-pthread_cond_t cond_casesInserees, cond_score;
-pthread_t hthread_message, hthread_piece, hthread_event, hthread_score;
+pthread_cond_t cond_casesInserees, cond_score, cond_analyse;
+pthread_t hthread_message, hthread_piece, hthread_event, hthread_score, hthread_gravite;
 
 int main(int argc,char* argv[])
 {
@@ -120,14 +127,17 @@ int main(int argc,char* argv[])
 	pthread_mutex_init(&mutex_casesInserees, NULL);
 	pthread_mutex_init(&mutex_tab, NULL);
 	pthread_mutex_init(&mutex_score, NULL);
+	pthread_mutex_init(&mutex_analyse, NULL);
 	pthread_cond_init(&cond_casesInserees, NULL);
 	pthread_cond_init(&cond_score, NULL);
+	pthread_cond_init(&cond_analyse, NULL);
 
 
 	pthread_create(&hthread_score, NULL,thread_score, NULL);
 	pthread_create(&hthread_message, NULL, thread_message, NULL);
 	pthread_create(&hthread_piece, NULL, thread_piece, NULL);
 	pthread_create(&hthread_event, NULL, thread_event, NULL);
+	pthread_create(&hthread_gravite, NULL, thread_gravite, NULL);
 
 	pthread_join(hthread_event, NULL);
 
@@ -192,9 +202,11 @@ void* thread_event(void* a)
 		pthread_mutex_destroy(&mutex_pieceEnCours);
 		pthread_mutex_destroy(&mutex_tab);
 		pthread_mutex_destroy(&mutex_score);
+		pthread_mutex_destroy(&mutex_analyse);
 
 		pthread_cond_destroy(&cond_casesInserees);
 		pthread_cond_destroy(&cond_score);
+		pthread_cond_destroy(&cond_analyse);
 
 		printf("OK\n"); fflush(stdout);
 
@@ -461,8 +473,217 @@ void *thread_score(void *a) {
     return NULL;
 }
 
+void* thread_gravite(void*)
+{
+	struct timespec nano, nano2;
+	nano.tv_sec = 2;
+	nano.tv_nsec = 0;
+	nano2.tv_sec = 0;
+	nano2.tv_nsec = 500000000;
+	int i, j, k;
+	int temp;
+	printf("(THREAD GRAVITE) STARTED\n");
+	while (1)
+	{
+		// ATTENTE DE LA CONDITION
+		pthread_mutex_lock(&mutex_analyse);
+		pthread_mutex_lock(&mutex_pieceEnCours);
+		while (nbAnalyses < pieceEnCours.nbCases)
+		{
+			pthread_mutex_unlock(&mutex_pieceEnCours);
+			pthread_cond_wait(&cond_analyse, &mutex_analyse);
+			pthread_mutex_lock(&mutex_pieceEnCours);
+		}
+		pthread_mutex_unlock(&mutex_pieceEnCours);
+		pthread_mutex_unlock(&mutex_analyse);
 
 
+		if (nbColonnesCompletes == 0 && nbLignesCompletes == 0)
+		{
+			nbAnalyses = 0;
+			continue;
+		}
+		printf("(THREAD GRAVITE) COND RECEIVED\n");
+
+
+		for (i = 0; i < 4; i++)
+		{
+			for (j = i+1; j < 4; j++)
+			{
+				if (j < nbColonnesCompletes && colonnesCompletes[j] < colonnesCompletes[i])
+				{
+					temp = colonnesCompletes[j];
+					colonnesCompletes[j] = colonnesCompletes[i];
+					colonnesCompletes[i] = temp;
+				}
+				if (j < nbLignesCompletes && lignesCompletes[j] < lignesCompletes[i])
+				{
+					temp = lignesCompletes[j];
+					lignesCompletes[j] = lignesCompletes[i];
+					lignesCompletes[i] = temp;
+				}
+			}
+		}
+
+		// REMPLACE PAR FUSION
+		for (i = 0; i < nbColonnesCompletes; i++)
+		{
+			pthread_mutex_lock(&mutex_tab);
+			for (j = 0; j < NB_LIGNES; j++)
+			{
+				tab[j][colonnesCompletes[i]] = FUSION;
+				DessineSprite(j, colonnesCompletes[i], FUSION);
+			}
+			pthread_mutex_unlock(&mutex_tab);
+		}
+		for (i = 0; i < nbLignesCompletes; i++)
+		{
+
+			pthread_mutex_lock(&mutex_tab);
+			for (j = 0; j < 10; j++)
+			{
+				tab[lignesCompletes[i]][j] = FUSION;
+				DessineSprite(lignesCompletes[i],j, FUSION);
+			}
+			pthread_mutex_unlock(&mutex_tab);
+		}
+
+		pthread_mutex_lock(&mutex_score);
+		score += 5;
+		majScore = 1;
+		pthread_cond_signal(&cond_score);
+		pthread_mutex_unlock(&mutex_score);
+
+		nanosleep(&nano, NULL);
+
+		// VIDER CASES
+		for (i = 0; i < nbColonnesCompletes; i++)
+		{
+			pthread_mutex_lock(&mutex_tab);
+			for (j = 0; j < NB_LIGNES; j++)
+			{
+				tab[j][colonnesCompletes[i]] = VIDE;
+				EffaceCarre(j, colonnesCompletes[i]);
+			}
+			pthread_mutex_unlock(&mutex_tab);
+		}
+		for (i = 0; i < nbLignesCompletes; i++)
+		{
+
+			pthread_mutex_lock(&mutex_tab);
+			for (j = 0; j < 10; j++)
+			{
+				tab[lignesCompletes[i]][j] = VIDE;
+				EffaceCarre(lignesCompletes[i],j);
+			}
+			pthread_mutex_unlock(&mutex_tab);
+		}
+
+		nanosleep(&nano2, NULL);
+
+		// DECALER CASES
+
+		// DE GAUCHE A DROITE
+		for (i = 0; i < nbColonnesCompletes && colonnesCompletes[i] < 5; i++)
+		{
+			pthread_mutex_lock(&mutex_tab);
+			for (k = colonnesCompletes[i]; k >= 0; k--)
+			{
+				for (j = 0; j < NB_LIGNES; j++)
+				{
+					if (k == 0 || tab[j][k-1] == VIDE)
+					{
+						tab[j][k] = VIDE;
+						EffaceCarre(j, k);
+					}
+					else
+					{
+						tab[j][k] = tab[j][k-1];
+						DessineSprite(j, k, tab[j][k-1]);
+					}
+				}
+			}
+			pthread_mutex_unlock(&mutex_tab);
+		}
+
+		// DE DROITE A GAUCHE
+		for (i = nbColonnesCompletes -1 ; i >= 0 && colonnesCompletes[i] >= 5; i--)
+		{
+			pthread_mutex_lock(&mutex_tab);
+			for (k = colonnesCompletes[i]; k < 10; k++)
+			{
+				for (j = 0; j < NB_LIGNES; j++)
+				{
+					if (k == 9 || tab[j][k+1] == VIDE)
+					{
+						tab[j][k] = VIDE;
+						EffaceCarre(j, k);
+					}
+					else
+					{
+						tab[j][k] = tab[j][k+1];
+						DessineSprite(j, k, tab[j][k+1]);
+					}
+				}
+			}
+			pthread_mutex_unlock(&mutex_tab);
+		}
+
+		// DE HAUT EN BAS
+		for (i = 0; i < nbLignesCompletes && lignesCompletes[i] < 7; i++)
+		{
+			pthread_mutex_lock(&mutex_tab);
+			for (k = lignesCompletes[i]; k >= 0; k--)
+			{
+				for (j = 0; j < 10; j++)
+				{
+					if (k == 0 || tab[k-1][j] == VIDE)
+					{
+						tab[k][j] = VIDE;
+						EffaceCarre(k, j);
+					}
+					else
+					{
+						tab[k][j] = tab[k-1][j];
+						DessineSprite(k, j, tab[k-1][j]);
+					}
+				}
+			}
+			pthread_mutex_unlock(&mutex_tab);
+		}
+
+		// DE BAS EN HAUT
+		for (i = nbLignesCompletes - 1; i >= 0 && lignesCompletes[i] >= 7; i--)
+		{
+			pthread_mutex_lock(&mutex_tab);
+			for (k = lignesCompletes[i]; k < NB_LIGNES; k++)
+			{
+				for (j = 0; j < 10; j++)
+				{
+					if (k == NB_LIGNES - 1 || tab[k+1][j] == VIDE)
+					{
+						tab[k][j] = VIDE;
+						EffaceCarre(k, j);
+					}
+					else
+					{
+						tab[k][j] = tab[k+1][j];
+						DessineSprite(k, j, tab[k+1][j]);
+					}
+				}
+			}
+			pthread_mutex_unlock(&mutex_tab);
+
+
+			nbAnalyses = 0;
+		}
+
+	}
+
+
+	pthread_exit(NULL);
+	return NULL;
+}
 
 
 
