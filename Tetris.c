@@ -197,12 +197,12 @@ int main(int argc,char* argv[])
 	sigprocmask(SIG_BLOCK, &mask, &oldmask);
 
 
-	if(argc >= 3)
+	if(argc >= 2)
 	{
 		ser_key = atoi(argv[1]);
 
 		//if(argc == 3)
-		strcpy(pseudo, argv[3]);
+		strcpy(pseudo, argv[2]);
 
 		/// SIGHUP
 		sigact.sa_handler = handlerSIGHUP;
@@ -210,6 +210,7 @@ int main(int argc,char* argv[])
 
 
 		pthread_create(&hthread_joueursconnectes, NULL, thread_joueursconnectes, NULL);
+		pthread_create(&hthread_top_score, NULL, thread_top_score, NULL);
 		//pthread_kill(hthread_joueursconnectes, SIGHUP);
 		handlerSIGQUIT(0);
     }
@@ -234,7 +235,6 @@ int main(int argc,char* argv[])
 	pthread_create(&hthread_event, NULL, thread_event, NULL);
 	pthread_create(&hthread_gravite, NULL, thread_gravite, NULL);
 	pthread_create(&hthread_fin, NULL, thread_fin, NULL);
-	pthread_create(&hthread_top_score, NULL, thread_top_score, NULL);
 	
 	/*
 	sigaddset(&oldmask, SIGUSR1);
@@ -259,13 +259,8 @@ int main(int argc,char* argv[])
         }
     }
     pthread_mutex_unlock(&mutex_threadcase);
-	/****************************************/
-
-    // Masquage pour les threads suivants
-    sigaddset(&mask, SIGUSR1);
-    pthread_sigmask(SIG_BLOCK, &mask, NULL);
 	
-	pthread_join(hthread_event, NULL);
+	pthread_join(hthread_fin, NULL);
 
 	if (!quit)
 		pthread_cancel(hthread_event);
@@ -276,8 +271,18 @@ int main(int argc,char* argv[])
 		for (j = 0; j < 10; ++j)
 			pthread_join(tabthreadcase[i][j], NULL);
 
+	if (argc >= 2)
+	{
+		pthread_cancel(hthread_joueursconnectes);
+		pthread_cancel(hthread_top_score);
+		pthread_join(hthread_top_score, NULL);
+		pthread_join(hthread_joueursconnectes, NULL);
+	}
+
 	pthread_cancel(hthread_score);
 	pthread_join(hthread_score, NULL);
+
+	printf("(THREAD MAIN) ATTENTE CROIX\n");
 
 	while (!quit)
 	{
@@ -662,10 +667,11 @@ pieceEnCours = pieces[0]; /// TRIIIIIIIIIIIIIIIIIIIICHE
 
 void score_cleanup(void*)
 {
+	printf("(THREAD SCORE) GAME OVER\n");
 	if(ser_key && EnvoiScore(ser_key, score) != 1)
-		set_message("Game Over");
-	else
 		set_message("Game Over mais vous avez obtenu le nouveau Top Score");
+	else
+		set_message("Game Over");
 }
 
 void *thread_score(void *a) {
@@ -1092,6 +1098,7 @@ void handlerSIGUSR2(int sig)
 	traitementEnCours = 1;
 	pthread_mutex_unlock(&mutex_traitement);
 	DessineSprite(12, 11, VOYANT_ROUGE);
+	printf("(THREAD PARTIE) FIN PARTIE\n");
     pthread_exit(NULL);
 }
 
