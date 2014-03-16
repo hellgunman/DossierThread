@@ -33,7 +33,7 @@ int tab[NB_LIGNES][NB_COLONNES]
    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}};
-  
+
 typedef struct
 {
 	int ligne;
@@ -77,6 +77,7 @@ int colonnesCompletes[4];
 int nbColonnesCompletes = 0;
 int lignesCompletes[4];
 int nbLignesCompletes = 0;
+int quit = 0;
 char traitementEnCours = 0;
 
 void* thread_piece(void*);
@@ -94,13 +95,26 @@ void handlerSIGUSR1(int sig);
 void *thread_fin(void*);
 void handlerSIGUSR2(int sig);
 
+/***** TOP SCORE ****/
+void* thread_top_score(void*);
+void handlerSIGQUIT(int);
+
+
+/***** Joueur Connecté *****/
+void *thread_joueursconnectes(void *);
+key_t ser_key = 0;
+char pseudo[20] = {"Anonyme"};
+void handlerSIGHUP(int sig);
+
 pthread_key_t key;
 
 void LiberonsLesKeys(void *p) {free(pthread_getspecific(key));}
 
-pthread_mutex_t mutex_message, mutex_pieceEnCours, mutex_casesInserees, mutex_tab, mutex_threadcase, mutex_analyse, mutex_score, mutex_traitement;
+pthread_mutex_t mutex_message, mutex_pieceEnCours, mutex_casesInserees,
+	mutex_tab, mutex_threadcase, mutex_analyse, mutex_score, mutex_traitement;
 pthread_cond_t cond_casesInserees, cond_analyse, cond_score;
-pthread_t hthread_message, hthread_piece, hthread_event, hthread_gravite, hthread_score, tabthreadcase[14][10], hthread_fin;
+pthread_t hthread_message, hthread_piece, hthread_event, hthread_gravite, hthread_score,
+	tabthreadcase[14][10], hthread_fin, hthread_top_score, hthread_joueursconnectes;
 
 int main(int argc,char* argv[])
 {
@@ -112,23 +126,32 @@ int main(int argc,char* argv[])
 	struct sigaction sigact;
 	
 	pthread_key_create(&key, LiberonsLesKeys);
-	
+
 	srand((unsigned)time(NULL));
 	
-	// Initialisation des trucs de signaux
-    sigset_t mask;
+    sigset_t mask, oldmask;
     sigemptyset(&sigact.sa_mask);
     sigact.sa_flags = 0;
     sigemptyset(&mask);
 	
 	/// SIGUSR1
 	sigact.sa_handler = handlerSIGUSR1;
+    sigact.sa_flags = 0;
     sigaction(SIGUSR1, &sigact, NULL);
-	
+
 	/// SIGUSR2
 	sigact.sa_handler=handlerSIGUSR2;
-    sigact.sa_flags = 0;
     sigaction(SIGUSR2, &sigact, NULL);
+
+    // SIGQUIT
+	sigact.sa_handler=handlerSIGQUIT;
+    sigaction(SIGQUIT, &sigact, NULL);
+
+    // SIGHUP
+    	sigact.sa_handler=handlerSIGHUP;
+        sigaction(SIGHUP, &sigact, NULL);
+
+    // MASQUAGE DES SIGNAUX
 
 	// Ouverture de la grille de jeu (SDL)
 	printf("(THREAD MAIN) Ouverture de la grille de jeu\n");
@@ -145,9 +168,10 @@ int main(int argc,char* argv[])
 	ChargementImages();
 	DessineSprite(12,11,VOYANT_VERT);
 
+
 	ok = 0;
 	
-	set_message("message super long");
+	set_message("Bienvenue");
 
 
 	pieceInseree.image;
@@ -165,13 +189,48 @@ int main(int argc,char* argv[])
 	pthread_cond_init(&cond_analyse, NULL);
 
 
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGUSR1);
+	sigaddset(&mask, SIGUSR2);
+	sigaddset(&mask, SIGHUP);
+	sigaddset(&mask, SIGQUIT);
+	sigprocmask(SIG_BLOCK, &mask, &oldmask);
+
+
+	if(argc >= 3)
+	{
+		ser_key = atoi(argv[1]);
+
+		//if(argc == 3)
+		strcpy(pseudo, argv[3]);
+
+		/// SIGHUP
+		sigact.sa_handler = handlerSIGHUP;
+		sigaction(SIGHUP, &sigact, NULL);
+
+
+		pthread_create(&hthread_joueursconnectes, NULL, thread_joueursconnectes, NULL);
+
+
+	}
+
+
+
 	pthread_create(&hthread_score, NULL,thread_score, NULL);
 	pthread_create(&hthread_message, NULL, thread_message, NULL);
 	pthread_create(&hthread_piece, NULL, thread_piece, NULL);
 	pthread_create(&hthread_event, NULL, thread_event, NULL);
 	pthread_create(&hthread_gravite, NULL, thread_gravite, NULL);
 	pthread_create(&hthread_fin, NULL, thread_fin, NULL);
+	pthread_create(&hthread_top_score, NULL, thread_top_score, NULL);
 	
+	/*
+	sigaddset(&oldmask, SIGUSR1);
+	sigaddset(&oldmask, SIGUSR2);
+	sigaddset(&oldmask, SIGHUP);
+	sigaddset(&oldmask, SIGQUIT);
+	sigprocmask(SIG_SETMASK, &oldmask, NULL);
+*/
 	
 	
 	/**********************************/
@@ -182,7 +241,7 @@ int main(int argc,char* argv[])
 		{
             c.ligne = i;
             c.colonne = j;
-			
+
 			pthread_create(&tabthreadcase[i][j], NULL, thread_case, &c);
             pthread_mutex_lock(&mutex_threadcase);
         }
@@ -196,6 +255,44 @@ int main(int argc,char* argv[])
 	
 	pthread_join(hthread_event, NULL);
 
+	if (!quit)
+		pthread_cancel(hthread_event);
+	for (i = 0; i < 14; ++i)
+		for (j = 0; j < 10; ++j)
+			pthread_cancel(tabthreadcase[i][j]);
+	for (i = 0; i < 14; ++i)
+		for (j = 0; j < 10; ++j)
+			pthread_join(tabthreadcase[i][j], NULL);
+
+	pthread_cancel(hthread_score);
+	pthread_join(hthread_score, NULL);
+
+	while (!quit)
+	{
+		event = ReadEvent();
+		if (event.type == CROIX)
+			quit = 1;
+	}
+
+	pthread_cancel(hthread_message);
+
+
+	// Fermeture de la grille de jeu (SDL)
+	printf("(THREAD MAIN) Fermeture de la grille...\n"); fflush(stdout);
+	FermerGrilleSDL();
+
+
+	pthread_mutex_destroy(&mutex_casesInserees);
+	pthread_mutex_destroy(&mutex_message);
+	pthread_mutex_destroy(&mutex_pieceEnCours);
+	pthread_mutex_destroy(&mutex_tab);
+	pthread_mutex_destroy(&mutex_score);
+	pthread_mutex_destroy(&mutex_analyse);
+
+	pthread_cond_destroy(&cond_casesInserees);
+	pthread_cond_destroy(&cond_score);
+	pthread_cond_destroy(&cond_analyse);
+
 	exit(0);
 
 
@@ -205,7 +302,7 @@ int main(int argc,char* argv[])
 void* thread_event(void* a)
 {
 	int ok = 0;
-	int i;
+	int i, j;
 	EVENT_GRILLE_SDL event;
 	struct timespec tempo;
 	tempo.tv_sec = 0;
@@ -218,7 +315,7 @@ void* thread_event(void* a)
 			{
 				pthread_mutex_lock(&mutex_casesInserees);
 				pthread_mutex_lock(&mutex_tab);
-				
+
 				for (i = 0; i < pieceInseree.nbCases; ++i)
 				{
 					EffaceCarre(pieceInseree.cases[i].ligne, pieceInseree.cases[i].colonne);
@@ -231,7 +328,7 @@ void* thread_event(void* a)
 			}
 			else if (event.type == CLIC_GAUCHE && tab[event.ligne][event.colonne] == VIDE
 					&& event.colonne < 10 && traitementEnCours == 0)
-			{				
+			{
 				pthread_mutex_lock(&mutex_casesInserees);
 				//if (pieceInseree.nbCases < pieceEnCours.nbCases)
 				{
@@ -246,7 +343,7 @@ void* thread_event(void* a)
 				pthread_mutex_lock(&mutex_tab);
 				DessineSprite(event.ligne,event.colonne,pieceEnCours.image);
 				tab[event.ligne][event.colonne] = pieceEnCours.image;
-				
+
 				if(pieceInseree.nbCases == pieceEnCours.nbCases)
 				{
 					pthread_mutex_lock(&mutex_traitement);
@@ -254,7 +351,7 @@ void* thread_event(void* a)
 					pthread_mutex_unlock(&mutex_traitement);
 					DessineSprite(12, 11, VOYANT_BLEU);
 				}
-				
+
 				pthread_mutex_unlock(&mutex_pieceEnCours);
 				pthread_mutex_unlock(&mutex_tab);
 			}
@@ -263,9 +360,9 @@ void* thread_event(void* a)
 			{
 				pthread_mutex_lock(&mutex_tab);
 				DessineSprite(12, 11, VOYANT_ROUGE);
-				
+
 				nanosleep(&tempo, NULL);
-				
+
 				if(traitementEnCours != 1)
 					DessineSprite(12, 11,VOYANT_VERT);
 				pthread_mutex_unlock(&mutex_tab);
@@ -273,20 +370,9 @@ void* thread_event(void* a)
 			
 		}
 
-		// Fermeture de la grille de jeu (SDL)
-		printf("(THREAD MAIN) Fermeture de la grille..."); fflush(stdout);
-		FermerGrilleSDL();
+		quit = 1;
+		pthread_cancel(hthread_fin);
 
-		pthread_mutex_destroy(&mutex_casesInserees);
-		pthread_mutex_destroy(&mutex_message);
-		pthread_mutex_destroy(&mutex_pieceEnCours);
-		pthread_mutex_destroy(&mutex_tab);
-		pthread_mutex_destroy(&mutex_score);
-		pthread_mutex_destroy(&mutex_analyse);
-
-		pthread_cond_destroy(&cond_casesInserees);
-		pthread_cond_destroy(&cond_score);
-		pthread_cond_destroy(&cond_analyse);
 
 		printf("OK\n"); fflush(stdout);
 
@@ -314,6 +400,13 @@ void set_message(const char* string)
 	}
 	pthread_mutex_unlock(&mutex_message);
 }
+void message_cleanup(void*)
+{
+	pthread_mutex_lock(&mutex_message);
+	free(message.string);
+	message.length = 0;
+	pthread_mutex_unlock(&mutex_message);
+}
 
 void* thread_message(void* a)
 {
@@ -321,6 +414,9 @@ void* thread_message(void* a)
 	struct timespec sleeptime;
 	sleeptime.tv_sec = 0;
 	sleeptime.tv_nsec = 500000000;
+
+	pthread_cleanup_push(message_cleanup, NULL);
+
 	while (1)
 	{
 		pthread_mutex_lock(&mutex_message);
@@ -341,6 +437,7 @@ void* thread_message(void* a)
 		}
 		pthread_mutex_unlock(&mutex_message);
 	}
+	pthread_cleanup_pop(1);
 	return NULL;
 }
 
@@ -452,8 +549,6 @@ pieceEnCours = pieces[0]; /// TRIIIIIIIIIIIIIIIIIIIICHE
 			DessineSprite(pieceEnCours.cases[i].ligne + l, pieceEnCours.cases[i].colonne + c, pieceEnCours.image);
 		}
 
-		/// VERIFIER SI POSABLE
-		pthread_kill(hthread_fin, SIGUSR2);
 
 		while (1)
 		{
@@ -522,20 +617,20 @@ pieceEnCours = pieces[0]; /// TRIIIIIIIIIIIIIIIIIIIICHE
 					DessineSprite(ptemp.cases[j].ligne, ptemp.cases[j].colonne, BRIQUE);
 				}
 				pthread_mutex_unlock(&mutex_tab);
-				
+
 				//////////////////////////////////////////////
 				pthread_mutex_lock(&mutex_analyse);
 				nbColonnesCompletes = 0;
 				nbLignesCompletes = 0;
 				nbAnalyses = 0; /******************* verif*/
 				pthread_mutex_unlock(&mutex_analyse);
-				
+
 				i = 0;
 				while(i < pieceEnCours.nbCases)
 				{
 					pthread_kill(tabthreadcase[ptemp.cases[i].ligne][ptemp.cases[i].colonne], SIGUSR1);
 					++i;
-				}				
+				}
 				break;
 			}
 			else
@@ -553,11 +648,19 @@ pieceEnCours = pieces[0]; /// TRIIIIIIIIIIIIIIIIIIIICHE
 	return NULL;
 }
 
+void score_cleanup(void*)
+{
+	if(ser_key && EnvoiScore(ser_key, score) != 1)
+		set_message("Game Over");
+	else
+		set_message("Game Over mais vous avez obtenu le nouveau Top Score");
+}
+
 void *thread_score(void *a) {
     printf("(THREAD SCORE) Lancement du thread Score\n");
     char cscore[5];
     int i;
-    //pthread_cleanup_push(sendScore, NULL);
+    pthread_cleanup_push(score_cleanup, NULL);
     sprintf(cscore, "   0");
 	for (i = 0; i < 4; ++i)
 		DessineLettre(1, 15+i, cscore[i]);
@@ -565,13 +668,14 @@ void *thread_score(void *a) {
     while(!majScore) {
         printf("(THREAD SCORE) MAJ du score : '%4d'\n", score);
         pthread_cond_wait(&cond_score, &mutex_score);
+
         sprintf(cscore, "%4d", score);
     	for (i = 0; i < 4; ++i)
     		DessineLettre(1, 15+i, cscore[i]);
         majScore = 0;
     }
     pthread_mutex_unlock(&mutex_score);
-    //pthread_cleanup_pop(1);
+    pthread_cleanup_pop(1);
     return NULL;
 }
 
@@ -579,35 +683,40 @@ void *thread_score(void *a) {
 void *thread_case(void* a)
 {
     CASE *c = (CASE*)malloc(sizeof(CASE));
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGUSR1);
+    sigprocmask(SIG_UNBLOCK, &mask, NULL);
 	
     if(!c)
         fprintf(stderr, "Erreur malloc thread CASE\n");
-	
+
     pthread_setspecific(key, c);
-	
+
     *c = *(CASE*) a;
     pthread_mutex_unlock(&mutex_threadcase);
 
     while(1)
         pause();
+    return NULL;
 }
 
 void handlerSIGUSR1(int sig)
-{   
+{
 	int i;
 	CASE *c = (CASE*)pthread_getspecific(key);
-    
+
 	i = 0;
 	while(i < 10)
 	{
         pthread_mutex_lock(&mutex_tab);
-		
+
         if(tab[c->ligne][i] == 0)
 		{
             pthread_mutex_unlock(&mutex_tab);
             break;
         }
-		
+
         pthread_mutex_unlock(&mutex_tab);
 		i++;
     }
@@ -615,7 +724,7 @@ void handlerSIGUSR1(int sig)
     if(i == 10)
 	{
         pthread_mutex_lock(&mutex_analyse);
-		
+
         i = 0;
         while(i < nbLignesCompletes)
 		{
@@ -623,12 +732,12 @@ void handlerSIGUSR1(int sig)
                 break;
             i++;
         }
-		
+
         if(i == nbLignesCompletes)
 		{
             lignesCompletes[nbLignesCompletes] = c->ligne;
             nbLignesCompletes++;
-			
+
 			i = 0;
 			while(i < 10)
             {
@@ -636,21 +745,21 @@ void handlerSIGUSR1(int sig)
 				i++;
             }
         }
-		
+
         pthread_mutex_unlock(&mutex_analyse);
     }
-	
+
 	i = 0;
 	while(i < 14)
 	{
         pthread_mutex_lock(&mutex_tab);
-		
+
         if(tab[i][c->colonne] == 0)
 		{
             pthread_mutex_unlock(&mutex_tab);
             break;
         }
-		
+
         pthread_mutex_unlock(&mutex_tab);
 		i++;
     }
@@ -658,7 +767,7 @@ void handlerSIGUSR1(int sig)
     if(i == 14)
 	{
         pthread_mutex_lock(&mutex_analyse);
-		
+
 		i = 0;
         while(i < nbColonnesCompletes)
 		{
@@ -666,7 +775,7 @@ void handlerSIGUSR1(int sig)
                 break;
             i++;
         }
-		
+
         if(i == nbColonnesCompletes)
 		{
 			colonnesCompletes[nbColonnesCompletes] = c->colonne;
@@ -679,7 +788,7 @@ void handlerSIGUSR1(int sig)
 				i++;
             }
         }
-		
+
         pthread_mutex_unlock(&mutex_analyse);
     }
 
@@ -709,7 +818,7 @@ void* thread_gravite(void*)
 		{
 			pthread_mutex_unlock(&mutex_pieceEnCours);
 			pthread_cond_wait(&cond_analyse, &mutex_analyse);
-			
+
 			pthread_mutex_lock(&mutex_pieceEnCours);
 		}
 		pthread_mutex_unlock(&mutex_pieceEnCours);
@@ -718,6 +827,9 @@ void* thread_gravite(void*)
 
 		if (nbColonnesCompletes == 0 && nbLignesCompletes == 0)
 		{
+
+			/// VERIFIER SI POSABLE
+			pthread_kill(hthread_fin, SIGUSR2);
 			nbAnalyses = 0;
 			continue;
 		}
@@ -727,7 +839,7 @@ void* thread_gravite(void*)
 		traitementEnCours = 1;
 		pthread_mutex_unlock(&mutex_traitement);
 		DessineSprite(12, 11, VOYANT_BLEU);
-		
+
 		for (i = 0; i < 4; i++)
 		{
 			for (j = i+1; j < 4; j++)
@@ -896,13 +1008,17 @@ void* thread_gravite(void*)
 			}
 			pthread_mutex_unlock(&mutex_tab);
 		}
-		
+
 		nbAnalyses = 0;
 		
 		pthread_mutex_lock(&mutex_traitement);
 		traitementEnCours = 0;
 		pthread_mutex_unlock(&mutex_traitement);
 		DessineSprite(12, 11, VOYANT_VERT);
+
+
+		/// VERIFIER SI POSABLE
+		pthread_kill(hthread_fin, SIGUSR2);
 	}
 
 
@@ -915,7 +1031,7 @@ void *thread_fin(void *)
     sigset_t mask;
     
 	sigemptyset(&mask);
-    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGUSR2);
     pthread_sigmask(SIG_UNBLOCK, &mask, NULL);
 
     while(1)
@@ -933,7 +1049,7 @@ void handlerSIGUSR2(int sig)
     int i = 0;
 	int j = 0;
 	int c = 0;
-	
+
     for(i=0;i<14;i++)
 	{
         for(j=0;j<10;j++)
@@ -946,15 +1062,15 @@ void handlerSIGUSR2(int sig)
                 if(i + pieceEnCours.cases[c].ligne < 14 && j + pieceEnCours.cases[c].colonne < 10)
 				{
 					if(tab[i + pieceEnCours.cases[c].ligne][j + pieceEnCours.cases[c].colonne] > 0)
-						break;			
+						break;
 				}
 				else
 					break;
             }
-			
+
             pthread_mutex_unlock(&mutex_tab);
             pthread_mutex_unlock(&mutex_pieceEnCours);
-			
+
             if(c == 4)
                 return;
         }
@@ -964,7 +1080,79 @@ void handlerSIGUSR2(int sig)
 	traitementEnCours = 1;
 	pthread_mutex_unlock(&mutex_traitement);
 	DessineSprite(12, 11, VOYANT_ROUGE);
-	set_message("LOOOOOOSER !!!");
-    printf("PEEEEERDUUUU !                             (t'es nul)\n");
     pthread_exit(NULL);
 }
+
+
+void* thread_top_score(void*)
+{
+	sigset_t mask;
+
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGQUIT);
+	pthread_sigmask(SIG_UNBLOCK, &mask, NULL);
+
+	while(1)
+		pause();
+
+	pthread_exit(NULL);
+	return NULL;
+}
+
+void handlerSIGQUIT(int)
+{
+	TOPSCORE top;
+	if (ser_key && GetTopScore(ser_key, &top) == 0)
+	{
+		char buff[100];
+		int i;
+
+		sprintf(buff, "%s %s", top.login, top.pseudo);
+		set_message(buff);
+		sprintf(buff, "%4d", top.score);
+		for(i = 0; i < 4; i++)
+			DessineLettre(8, 15+i, buff[i]);
+	}
+}
+
+void joueurs_cleanup(void*)
+{
+	DeconnectionServeur(ser_key);
+}
+
+/***** Joueur Connecté *****/
+void *thread_joueursconnectes(void *)
+{
+
+	sigset_t mask;
+
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGHUP);
+	pthread_sigmask(SIG_UNBLOCK, &mask, NULL);
+
+    pthread_cleanup_push(joueurs_cleanup, NULL);
+    if(ConnectionServeur(ser_key, pseudo) != 0)
+        printf("La connexion au serveur a echouer\n");
+    while(1)
+        pause();
+
+    pthread_cleanup_pop(1);
+}
+
+void handlerSIGHUP(int sig)
+{
+	int connectes = GetNbJoueursConnectes(ser_key);
+	printf("nb connectés: %d", connectes);
+
+	if(connectes > 98)
+	{
+		DessineSprite(12, 17, CHIFFRE_9);
+        DessineSprite(12, 18, CHIFFRE_9);
+	}
+	else
+	{
+		DessineSprite(12, 17, CHIFFRE_0 + (connectes-connectes%10)/10);
+        DessineSprite(12, 18, CHIFFRE_0 + connectes%10);
+    }
+}
+
