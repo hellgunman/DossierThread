@@ -172,7 +172,6 @@ int main(int argc,char* argv[])
 
 	ok = 0;
 	
-	set_message("Bienvenue");
 
 
 	pieceInseree.image;
@@ -211,6 +210,18 @@ int main(int argc,char* argv[])
 
 
 		pthread_create(&hthread_joueursconnectes, NULL, thread_joueursconnectes, NULL);
+		//pthread_kill(hthread_joueursconnectes, SIGHUP);
+		handlerSIGQUIT(0);
+    }
+    else
+    {
+        DessineLettre(8, 15, ' ');
+        DessineLettre(8, 16, ' ');
+        DessineLettre(8, 17, ' ');
+        DessineLettre(8, 18, ' ');
+    	set_message("hors ligne");
+        DessineLettre(12, 17, ' ');
+        DessineLettre(12, 18, ' ');
 
 
 	}
