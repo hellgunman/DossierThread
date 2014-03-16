@@ -92,9 +92,7 @@ void handlerSIGUSR1(int sig);
 
 pthread_key_t key;
 
-void suppressionCase(void *p) {
-    free(pthread_getspecific(key));
-}
+void LiberonsLesKeys(void *p) {free(pthread_getspecific(key));}
 
 pthread_mutex_t mutex_message, mutex_pieceEnCours, mutex_casesInserees, mutex_tab, mutex_threadcase, mutex_analyse, mutex_score;
 pthread_cond_t cond_casesInserees, cond_analyse, cond_score;
@@ -109,7 +107,7 @@ int main(int argc,char* argv[])
 	CASE c;
 	struct sigaction sigact;
 	
-	pthread_key_create(&key, suppressionCase);
+	pthread_key_create(&key, LiberonsLesKeys);
 	
 	srand((unsigned)time(NULL));
 	
@@ -166,14 +164,13 @@ int main(int argc,char* argv[])
 	
 	
 	
-	/**********************************
+	/**********************************/
 	pthread_mutex_lock(&mutex_threadcase);
     for(i=0;i<14;i++)
 	{
         for(j=0;j<10;j++)
 		{
             c.ligne = i;
-printf("b    %d\n",c.ligne);
             c.colonne = j;
 			
 			pthread_create(&tabthreadcase[i][j], NULL, thread_case, &c);
@@ -181,21 +178,7 @@ printf("b    %d\n",c.ligne);
         }
     }
     pthread_mutex_unlock(&mutex_threadcase);
-	****************************************/
-	
-	pthread_mutex_lock(&mutex_threadcase);
-    for(i = 0; i < 14; ++i) {
-        for(j = 0; j < 10; ++j) {
-            c.ligne = i;
-            c.colonne = j;
-
-            if(pthread_create(&tabthreadcase[i][j], NULL, thread_case, &c) != 0) {
-                fprintf(stderr, "Erreur de lancement du threadCase[%d][%d]", i, j);
-            }
-            pthread_mutex_lock(&mutex_threadcase);
-        }
-    }
-    pthread_mutex_unlock(&mutex_threadcase);
+	/****************************************/
 
     // Masquage pour les threads suivants
     sigaddset(&mask, SIGUSR1);
@@ -505,8 +488,6 @@ void* thread_piece(void* a)
 				pthread_mutex_unlock(&mutex_tab);
 				
 				//////////////////////////////////////////////
-
-				printf("boudin\n");
 				pthread_mutex_lock(&mutex_analyse);
 				nbColonnesCompletes = 0;
 				nbLignesCompletes = 0;
@@ -517,10 +498,8 @@ void* thread_piece(void* a)
 				while(i < pieceEnCours.nbCases)
 				{
 					pthread_kill(tabthreadcase[ptemp.cases[i].ligne][ptemp.cases[i].colonne], SIGUSR1);
-					printf("salut  %d\n",i);
 					++i;
 				}
-				printf("blanc\n");
 				
 				break;
 			}
@@ -557,7 +536,7 @@ void *thread_score(void *a) {
 /***************************** THREAD CASE ***************************************/
 void *thread_case(void* a)
 {
-    /*CASE *c = (CASE*)malloc(sizeof(CASE));
+    CASE *c = (CASE*)malloc(sizeof(CASE));
 	
     if(!c)
         fprintf(stderr, "Erreur malloc thread CASE\n");
@@ -565,36 +544,18 @@ void *thread_case(void* a)
     pthread_setspecific(key, c);
 	
     *c = *(CASE*) a;
-printf("coucou    %d\n",c->ligne);
     pthread_mutex_unlock(&mutex_threadcase);
 
     while(1)
         pause();
-		*/
-	CASE *tmpCase = (CASE*) malloc(sizeof(CASE));
-    if(!tmpCase) {
-        fprintf(stderr, "(THREAD CASE) malloc fail...\n");
-    }
-    if(pthread_setspecific(key, tmpCase) != 0) {
-        fprintf(stderr, "(THREAD CASE) pthread_setspecific fail...\n");
-    }
-    *tmpCase = *(CASE*) a;
-    pthread_mutex_unlock(&mutex_threadcase);
-
-    for(;;) {
-        pause();
-    }
 }
 
 void handlerSIGUSR1(int sig)
-{
-printf("bleu\n");    
-int i;
+{   
+	int i;
 	CASE *c = (CASE*)pthread_getspecific(key);
-	if(c->ligne >14)
-		printf("anaconda\n");
     
-	i = 0;printf("b    %d\n",c->ligne);
+	i = 0;
 	while(i < 10)
 	{
         pthread_mutex_lock(&mutex_tab);
@@ -603,12 +564,12 @@ int i;
 		{
             pthread_mutex_unlock(&mutex_tab);printf("zzzz\n");
             break;
-        }printf("c\n");
+        }
 		
         pthread_mutex_unlock(&mutex_tab);
 		i++;
     }
-printf("1\n");
+
     if(i == 10)
 	{
         pthread_mutex_lock(&mutex_analyse);
@@ -631,7 +592,7 @@ printf("1\n");
             {
                 DessineSprite(c->ligne,i,FUSION);
 				i++;
-            }printf("2\n");
+            }
         }
 		
         pthread_mutex_unlock(&mutex_analyse);
@@ -651,7 +612,7 @@ printf("1\n");
         pthread_mutex_unlock(&mutex_tab);
 		i++;
     }
-printf("3\n");
+
     if(i == 14)
 	{
         pthread_mutex_lock(&mutex_analyse);
@@ -663,7 +624,7 @@ printf("3\n");
                 break;
             i++;
         }
-		printf("4\n");
+		
         if(i == nbColonnesCompletes)
 		{
 			colonnesCompletes[nbColonnesCompletes] = c->colonne;
@@ -684,82 +645,6 @@ printf("3\n");
     nbAnalyses++;
     pthread_cond_signal(&cond_analyse);
     pthread_mutex_unlock(&mutex_analyse);
-
-	printf("noir\n");
-	
-	// printf("(HANDLER SIGUSR1) start\n");
-    /*CASE *tmpCase = (CASE*) pthread_getspecific(key);
-    if(!tmpCase) {
-        fprintf(stderr, "pthread_getspecific fail...\n");
-        exit(1);
-    }
-    int i;
-
-    // Check si la colonne est complète
-    for(i = 0; i < 14; ++i) {
-        pthread_mutex_lock(&mutex_tab);
-        if(tab[i][tmpCase->colonne] == 0) {
-            pthread_mutex_unlock(&mutex_tab);
-            break;
-        }
-        pthread_mutex_unlock(&mutex_tab);
-    }
-
-    if(i == 14) {
-        pthread_mutex_lock(&mutex_analyse);
-        i = 0;
-        while(i < nbColonnesCompletes) {
-            if(colonnesCompletes[i] == tmpCase->colonne) {
-                break;
-            }
-            ++i;
-        }
-        if(i == nbColonnesCompletes) {
-            printf("(HANDLER SIGUSR1) colonne %d complete\n", tmpCase->colonne);
-            colonnesCompletes[nbColonnesCompletes] = tmpCase->colonne;
-            ++nbColonnesCompletes;
-
-            for(i = 0; i < 14; ++i) {
-                DessineSprite(i,tmpCase->colonne,FUSION);
-            }
-        }
-        pthread_mutex_unlock(&mutex_analyse);
-    }
-
-    // Check si la ligne est complète
-    for(i = 0; i < 10; ++i) {
-        pthread_mutex_lock(&mutex_tab);
-        if(tab[tmpCase->ligne][i] == 0) {
-            pthread_mutex_unlock(&mutex_tab);
-            break;
-        }
-        pthread_mutex_unlock(&mutex_tab);
-    }
-
-    if(i == 10) {
-        pthread_mutex_lock(&mutex_analyse);
-        i = 0;
-        while(i < nbLignesCompletes) {
-            if(lignesCompletes[i] == tmpCase->ligne) {
-                break;
-            }
-            ++i;
-        }
-        if(i == nbLignesCompletes) {
-            printf("(HANDLER SIGUSR1) ligne %d complete\n", tmpCase->ligne);
-            lignesCompletes[nbLignesCompletes] = tmpCase->ligne;
-            ++nbLignesCompletes;
-            for(i = 0; i < 10; ++i) {
-                DessineSprite(tmpCase->ligne,i,FUSION);
-            }
-        }
-        pthread_mutex_unlock(&mutex_analyse);
-    }
-    pthread_mutex_lock(&mutex_analyse);
-    ++nbAnalyses;
-    pthread_cond_signal(&cond_analyse);
-	printf("condition anal :)\n");
-    pthread_mutex_unlock(&mutex_analyse);*/
 }
 /*********************************************************************************/
 
@@ -783,7 +668,7 @@ void* thread_gravite(void*)
 		{
 			pthread_mutex_unlock(&mutex_pieceEnCours);
 			pthread_cond_wait(&cond_analyse, &mutex_analyse);
-			printf("chiassssssssse\n");
+			
 			pthread_mutex_lock(&mutex_pieceEnCours);
 		}
 		pthread_mutex_unlock(&mutex_pieceEnCours);
@@ -965,11 +850,9 @@ void* thread_gravite(void*)
 				}
 			}
 			pthread_mutex_unlock(&mutex_tab);
-
-
-			//nbAnalyses = 0;
 		}
-nbAnalyses = 0;
+		
+		nbAnalyses = 0;
 	}
 
 
