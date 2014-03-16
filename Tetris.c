@@ -543,7 +543,7 @@ void* thread_piece(void* a)
 		pthread_mutex_unlock(&mutex_tab);
 
 		pieceEnCours = pieces[rand() % 7];
-pieceEnCours = pieces[0]; /// TRIIIIIIIIIIIIIIIIIIIICHE
+//pieceEnCours = pieces[0]; /// TRIIIIIIIIIIIIIIIIIIIICHE
 		// EFFECTUER ROTATION
 		rotation_piece(&pieceEnCours);
 
