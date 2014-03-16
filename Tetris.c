@@ -94,13 +94,19 @@ void handlerSIGUSR1(int sig);
 void *thread_fin(void*);
 void handlerSIGUSR2(int sig);
 
+/***** Joueur Connecté *****/
+void *thread_joueursconnectes(void *);
+key_t cle = 0;
+char pseudo[20] = {"Anonyme"};
+void handlerSIGHUP(int sig);
+
 pthread_key_t key;
 
 void LiberonsLesKeys(void *p) {free(pthread_getspecific(key));}
 
 pthread_mutex_t mutex_message, mutex_pieceEnCours, mutex_casesInserees, mutex_tab, mutex_threadcase, mutex_analyse, mutex_score, mutex_traitement;
 pthread_cond_t cond_casesInserees, cond_analyse, cond_score;
-pthread_t hthread_message, hthread_piece, hthread_event, hthread_gravite, hthread_score, tabthreadcase[14][10], hthread_fin;
+pthread_t hthread_message, hthread_piece, hthread_event, hthread_gravite, hthread_score, tabthreadcase[14][10], hthread_fin, hthread_joueursconnectes;
 
 int main(int argc,char* argv[])
 {
@@ -115,20 +121,19 @@ int main(int argc,char* argv[])
 	
 	srand((unsigned)time(NULL));
 	
-	// Initialisation des trucs de signaux
     sigset_t mask;
     sigemptyset(&sigact.sa_mask);
     sigact.sa_flags = 0;
     sigemptyset(&mask);
 	
+	/// SIGUSR2
+	sigact.sa_handler=handlerSIGUSR2;
+    sigaction(SIGUSR2, &sigact, NULL);
+	pthread_create(&hthread_fin, NULL, thread_fin, NULL);
+	
 	/// SIGUSR1
 	sigact.sa_handler = handlerSIGUSR1;
     sigaction(SIGUSR1, &sigact, NULL);
-	
-	/// SIGUSR2
-	sigact.sa_handler=handlerSIGUSR2;
-    sigact.sa_flags = 0;
-    sigaction(SIGUSR2, &sigact, NULL);
 
 	// Ouverture de la grille de jeu (SDL)
 	printf("(THREAD MAIN) Ouverture de la grille de jeu\n");
@@ -144,6 +149,24 @@ int main(int argc,char* argv[])
 	// Chargement des sprites et de l'image de fond
 	ChargementImages();
 	DessineSprite(12,11,VOYANT_VERT);
+	
+	
+    if(argc > 1)
+	{
+        cle = atoi(argv[1]);
+		
+		if(argc == 3)
+			strcpy(pseudo, argv[3]);
+
+        /// SIGHUP
+        sigact.sa_handler = handlerSIGHUP;
+        sigaction(SIGHUP, &sigact, NULL);
+		
+		
+        pthread_create(&hthread_joueursconnectes, NULL, thread_joueursconnectes, NULL);
+
+        
+    }
 
 	ok = 0;
 	
@@ -170,11 +193,10 @@ int main(int argc,char* argv[])
 	pthread_create(&hthread_piece, NULL, thread_piece, NULL);
 	pthread_create(&hthread_event, NULL, thread_event, NULL);
 	pthread_create(&hthread_gravite, NULL, thread_gravite, NULL);
-	pthread_create(&hthread_fin, NULL, thread_fin, NULL);
 	
 	
 	
-	/**********************************/
+	
 	pthread_mutex_lock(&mutex_threadcase);
     for(i=0;i<14;i++)
 	{
@@ -188,7 +210,7 @@ int main(int argc,char* argv[])
         }
     }
     pthread_mutex_unlock(&mutex_threadcase);
-	/****************************************/
+	
 
     // Masquage pour les threads suivants
     sigaddset(&mask, SIGUSR1);
@@ -197,9 +219,6 @@ int main(int argc,char* argv[])
 	pthread_join(hthread_event, NULL);
 
 	exit(0);
-
-
-
 }
 
 void* thread_event(void* a)
@@ -451,9 +470,6 @@ pieceEnCours = pieces[0]; /// TRIIIIIIIIIIIIIIIIIIIICHE
 		for (i = 0; i < pieceEnCours.nbCases; ++i) {
 			DessineSprite(pieceEnCours.cases[i].ligne + l, pieceEnCours.cases[i].colonne + c, pieceEnCours.image);
 		}
-
-		/// VERIFIER SI POSABLE
-		pthread_kill(hthread_fin, SIGUSR2);
 
 		while (1)
 		{
@@ -714,11 +730,13 @@ void* thread_gravite(void*)
 		}
 		pthread_mutex_unlock(&mutex_pieceEnCours);
 		pthread_mutex_unlock(&mutex_analyse);
-
+		
 
 		if (nbColonnesCompletes == 0 && nbLignesCompletes == 0)
 		{
 			nbAnalyses = 0;
+			/// VERIFIER SI POSABLE
+			pthread_kill(hthread_fin, SIGUSR2);
 			continue;
 		}
 		printf("(THREAD GRAVITE) COND RECEIVED\n");
@@ -899,6 +917,9 @@ void* thread_gravite(void*)
 		
 		nbAnalyses = 0;
 		
+		/// VERIFIER SI POSABLE
+		pthread_kill(hthread_fin, SIGUSR2);
+		
 		pthread_mutex_lock(&mutex_traitement);
 		traitementEnCours = 0;
 		pthread_mutex_unlock(&mutex_traitement);
@@ -959,12 +980,36 @@ void handlerSIGUSR2(int sig)
                 return;
         }
     }
-	
-	pthread_mutex_lock(&mutex_traitement);
-	traitementEnCours = 1;
-	pthread_mutex_unlock(&mutex_traitement);
-	DessineSprite(12, 11, VOYANT_ROUGE);
 	set_message("LOOOOOOSER !!!");
     printf("PEEEEERDUUUU !                             (t'es nul)\n");
     pthread_exit(NULL);
+}
+
+/***** Joueur Connecté *****/
+void *thread_joueursconnectes(void *)
+{
+    pthread_cleanup_push(DeconnectionServeur(cle), NULL);
+    if(ConnectionServeur(cle, pseudo) != 0)
+        printf("La connexion au serveur a echouer\n");
+    while(1)
+        pause();
+	
+    pthread_cleanup_pop(1);
+}
+
+void handlerSIGHUP(int sig)
+{
+	int connectes = GetNbJoueursConnectes(cle);
+	printf("nb connectés: %d", connectes);
+	
+	if(connectes > 98)
+	{
+		DessineSprite(12, 17, CHIFFRE_9);
+        DessineSprite(12, 18, CHIFFRE_9);
+	}
+	else
+	{
+		DessineSprite(12, 17, CHIFFRE_0 + (connectes-connectes%10)/10);
+        DessineSprite(12, 18, CHIFFRE_0 + connectes%10);
+    }
 }
