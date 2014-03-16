@@ -200,6 +200,7 @@ int main(int argc,char* argv[])
 	if(argc >= 2)
 	{
 		ser_key = atoi(argv[1]);
+                printf("(THREAD MAIN) ser_key = %d\n", ser_key);
 
 		//if(argc == 3)
 		strcpy(pseudo, argv[2]);
@@ -231,8 +232,13 @@ int main(int argc,char* argv[])
 
 	pthread_create(&hthread_score, NULL,thread_score, NULL);
 	pthread_create(&hthread_message, NULL, thread_message, NULL);
+        
+        pthread_mutex_lock(&mutex_pieceEnCours);
+        
 	pthread_create(&hthread_piece, NULL, thread_piece, NULL);
 	pthread_create(&hthread_event, NULL, thread_event, NULL);
+        pthread_mutex_lock(&mutex_pieceEnCours);
+        pthread_mutex_unlock(&mutex_pieceEnCours);
 	pthread_create(&hthread_gravite, NULL, thread_gravite, NULL);
 	pthread_create(&hthread_fin, NULL, thread_fin, NULL);
 	
@@ -271,16 +277,17 @@ int main(int argc,char* argv[])
 		for (j = 0; j < 10; ++j)
 			pthread_join(tabthreadcase[i][j], NULL);
 
+	pthread_cancel(hthread_score);
+	pthread_join(hthread_score, NULL);
+        
 	if (argc >= 2)
 	{
 		pthread_cancel(hthread_joueursconnectes);
+		pthread_join(hthread_joueursconnectes, NULL);
 		pthread_cancel(hthread_top_score);
 		pthread_join(hthread_top_score, NULL);
-		pthread_join(hthread_joueursconnectes, NULL);
 	}
 
-	pthread_cancel(hthread_score);
-	pthread_join(hthread_score, NULL);
 
 	printf("(THREAD MAIN) ATTENTE CROIX\n");
 
@@ -520,7 +527,6 @@ void* thread_piece(void* a)
 	char scoreString[8];
 
 
-	pthread_mutex_lock(&mutex_pieceEnCours);
 	pieceEnCours = pieces[0];
 	pthread_mutex_unlock(&mutex_pieceEnCours);
 
@@ -668,10 +674,28 @@ pieceEnCours = pieces[0]; /// TRIIIIIIIIIIIIIIIIIIIICHE
 void score_cleanup(void*)
 {
 	printf("(THREAD SCORE) GAME OVER\n");
-	if(ser_key && EnvoiScore(ser_key, score) != 1)
-		set_message("Game Over mais vous avez obtenu le nouveau Top Score");
+        if (ser_key)
+        {
+            int ret = EnvoiScore(ser_key, score);
+            if( ret == -1)
+            {
+                printf("(THREAD SCORE) ERREUR D'ENVOI DU SCORE\n");
+            }
+            else if (ret == 1)
+            {
+                printf("(THREAD SCORE) MEILLEUR SCORE\n");
+                set_message("Game Over mais vous avez battu le meilleur score");
+            }
+            else if (ret == 0)
+            {
+                printf("(THREAD SCORE) MOINS BON\n");
+                set_message("Game Over");
+            }
+            else                
+                printf("(THREAD SCORE) OUATE DE PHOQUE V2 %d!\n", ret);
+        }
 	else
-		set_message("Game Over");
+            printf("(THREAD SCORE) OUATE DE PHOQUE %d\n", ser_key);
 }
 
 void *thread_score(void *a) {
@@ -723,6 +747,8 @@ void handlerSIGUSR1(int sig)
 {
 	int i;
 	CASE *c = (CASE*)pthread_getspecific(key);
+        
+        printf("(THREAD CASE) SIGUSR1 RECEIVED\n");
 
 	i = 0;
 	while(i < 10)
@@ -842,6 +868,7 @@ void* thread_gravite(void*)
 		pthread_mutex_unlock(&mutex_pieceEnCours);
 		pthread_mutex_unlock(&mutex_analyse);
 
+                printf("(THREAD GRAVITE) CALCULER GRAVITE %d %d\n", nbAnalyses, pieceEnCours.nbCases);
 
 		if (nbColonnesCompletes == 0 && nbLignesCompletes == 0)
 		{
@@ -1053,12 +1080,12 @@ void *thread_fin(void *)
     pthread_sigmask(SIG_UNBLOCK, &mask, NULL);
 
     while(1)
-	{
+    {
         pause();
-		pthread_mutex_lock(&mutex_traitement);
-		traitementEnCours = 0;
-		pthread_mutex_unlock(&mutex_traitement);
-		DessineSprite(12, 11, VOYANT_VERT);
+        pthread_mutex_lock(&mutex_traitement);
+        traitementEnCours = 0;
+        pthread_mutex_unlock(&mutex_traitement);
+        DessineSprite(12, 11, VOYANT_VERT);
     }
 }
 
@@ -1067,11 +1094,13 @@ void handlerSIGUSR2(int sig)
     int i = 0;
 	int j = 0;
 	int c = 0;
+        
+        printf("(THREAD FIN) SIGUSR2 RECEIVED\n");
 
     for(i=0;i<14;i++)
-	{
+    {
         for(j=0;j<10;j++)
-		{
+        {
             pthread_mutex_lock(&mutex_pieceEnCours);
             pthread_mutex_lock(&mutex_tab);
 
@@ -1091,6 +1120,7 @@ void handlerSIGUSR2(int sig)
 
             if(c == 4)
                 return;
+                //break;
         }
     }
 	
